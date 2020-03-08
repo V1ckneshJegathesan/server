@@ -156,7 +156,7 @@ static LF_HASH xid_cache;
 static bool xid_cache_inited;
 
 
-enum xa_states XID_STATE::get_state_code()
+enum xa_states XID_STATE::get_state_code() const
 {
   return xid_cache_element ? xid_cache_element->xa_state : XA_NO_STATE;
 }
@@ -180,9 +180,14 @@ void XID_STATE::set_error(uint error)
 void XID_STATE::er_xaer_rmfail() const
 {
   static const char *xa_state_names[]=
-    { "ACTIVE", "IDLE", "PREPARED", "ROLLBACK ONLY" };
-  my_error(ER_XAER_RMFAIL, MYF(0), is_explicit_XA() ?
-           xa_state_names[xid_cache_element->xa_state] : "NON-EXISTING");
+    { "ACTIVE", "IDLE", "PREPARED", "ROLLBACK ONLY", "NON-EXISTING"};
+  my_error(ER_XAER_RMFAIL, MYF(0), xa_state_names[get_state_code()]);
+}
+
+
+void XID_STATE::er_xa_rbrollback() const
+{
+  my_error(ER_XA_RBROLLBACK, MYF(0));
 }
 
 
@@ -384,11 +389,13 @@ static bool xa_trans_rolled_back(XID_cache_element *element)
 
 /**
   Rollback the active XA transaction.
+  @param thd         pointer to THD
+  @param keep_cache  whether to keep XID in the cache
 
   @return TRUE if the rollback failed, FALSE otherwise.
 */
 
-bool xa_trans_force_rollback(THD *thd)
+bool xa_trans_force_rollback(THD *thd, bool keep_cache= false)
 {
   bool rc= false;
 
@@ -403,7 +410,8 @@ bool xa_trans_force_rollback(THD *thd)
   thd->server_status&=
     ~(SERVER_STATUS_IN_TRANS | SERVER_STATUS_IN_TRANS_READONLY);
   DBUG_PRINT("info", ("clearing SERVER_STATUS_IN_TRANS"));
-  xid_cache_delete(thd, &thd->transaction.xid_state);
+  if (!keep_cache)
+    xid_cache_delete(thd, &thd->transaction.xid_state);
 
   trans_track_end_trx(thd);
 
@@ -805,8 +813,14 @@ bool trans_xa_detach(THD *thd)
 {
   DBUG_ASSERT(thd->transaction.xid_state.is_explicit_XA());
 
-  if (thd->transaction.xid_state.xid_cache_element->xa_state != XA_PREPARED)
+  if (thd->transaction.xid_state.get_state_code() != XA_PREPARED)
     return xa_trans_force_rollback(thd);
+  else if (!thd->transaction.all.is_trx_read_write())
+  {
+    thd->transaction.xid_state.set_error(ER_XA_RBROLLBACK);
+    xa_trans_force_rollback(thd, true);
+  }
+
   thd->transaction.xid_state.xid_cache_element->acquired_to_recovered();
   thd->transaction.xid_state.xid_cache_element= 0;
   thd->transaction.cleanup();

@@ -523,7 +523,7 @@ public:
                     ulong *param_ptr_binlog_stmt_cache_disk_use,
                     ulong *param_ptr_binlog_cache_use,
                     ulong *param_ptr_binlog_cache_disk_use)
-    : last_commit_pos_offset(0), using_xa(FALSE), xa_xid(0)
+    : last_commit_pos_offset(0), using_xa(FALSE), xa_xid(0), empty_xa(false)
   {
      stmt_cache.set_binlog_cache_info(param_max_binlog_stmt_cache_size,
                                       param_ptr_binlog_stmt_cache_use,
@@ -544,6 +544,7 @@ public:
       using_xa= FALSE;
       last_commit_pos_file[0]= 0;
       last_commit_pos_offset= 0;
+      empty_xa= false;
     }
   }
 
@@ -585,7 +586,10 @@ public:
   ulong binlog_id;
   /* Set if we get an error during commit that must be returned from unlog(). */
   bool delayed_error;
-
+  /*
+    Reminder flag to consult at XA completion. RO in engine XA is not logged.
+  */
+  bool empty_xa;
 private:
 
   binlog_cache_mngr& operator=(const binlog_cache_mngr& info);
@@ -2043,8 +2047,8 @@ static int binlog_rollback_by_xid(handlerton *hton, XID *xid)
 
   (void) thd->binlog_setup_trx_data();
 
-  DBUG_ASSERT(thd->lex->sql_command == SQLCOM_XA_ROLLBACK);
-
+  DBUG_ASSERT(thd->lex->sql_command == SQLCOM_XA_ROLLBACK ||
+              (thd->transaction.xid_state.get_state_code() == XA_ROLLBACK_ONLY));
   return binlog_rollback(hton, thd, TRUE);
 }
 
@@ -2172,10 +2176,12 @@ static int binlog_commit(handlerton *hton, THD *thd, bool all)
   }
 
   if (cache_mngr->trx_cache.empty() &&
-      thd->transaction.xid_state.get_state_code() != XA_PREPARED)
+      (thd->transaction.xid_state.get_state_code() != XA_PREPARED ||
+       (all && thd->in_multi_stmt_transaction_mode() && cache_mngr->empty_xa)))
   {
     /*
       we're here because cache_log was flushed in MYSQL_BIN_LOG::log_xid()
+      or it's a read-only (prepared) XA that has nothing to log.
     */
     cache_mngr->reset(false, true);
     THD_STAGE_INFO(thd, org_stage);
@@ -2250,7 +2256,8 @@ static int binlog_rollback(handlerton *hton, THD *thd, bool all)
   }
 
   if (cache_mngr->trx_cache.empty() &&
-      thd->transaction.xid_state.get_state_code() != XA_PREPARED)
+      (thd->transaction.xid_state.get_state_code() != XA_PREPARED ||
+       (all && thd->in_multi_stmt_transaction_mode() && cache_mngr->empty_xa)))
   {
     /*
       we're here because cache_log was flushed in MYSQL_BIN_LOG::log_xid()
@@ -10006,6 +10013,10 @@ int TC_LOG_BINLOG::unlog(ulong cookie, my_xid xid)
   DBUG_RETURN(BINLOG_COOKIE_GET_ERROR_FLAG(cookie));
 }
 
+bool write_empty_xa_prepare(THD *thd, binlog_cache_mngr *cache_mngr)
+{
+  return binlog_commit_flush_xa_prepare(thd, true, cache_mngr);
+}
 
 int TC_LOG_BINLOG::unlog_xa_prepare(THD *thd, bool all)
 {
@@ -10014,10 +10025,21 @@ int TC_LOG_BINLOG::unlog_xa_prepare(THD *thd, bool all)
   binlog_cache_mngr *cache_mngr= thd->binlog_setup_trx_data();
   int cookie= 0;
 
-  if (!cache_mngr || !cache_mngr->need_unlog)
-    return 0;
-  else
-    cookie= BINLOG_COOKIE_MAKE(cache_mngr->binlog_id, cache_mngr->delayed_error);
+  if (!cache_mngr->need_unlog)
+  {
+    Ha_trx_info *ha_info;
+    uint rw_count= ha_count_rw_all(thd, &ha_info);
+
+    if (rw_count == 1 && ha_info->ht() == binlog_hton)
+    {
+      // drop formal rw status to pure non-transactional engine XA
+      ha_info->set_trx_read_only();
+      cache_mngr->empty_xa= !(rw_count= 0);
+    }
+    return rw_count > 0 ? write_empty_xa_prepare(thd, cache_mngr) : 0;
+  }
+
+  cookie= BINLOG_COOKIE_MAKE(cache_mngr->binlog_id, cache_mngr->delayed_error);
   cache_mngr->need_unlog= false;
 
   return unlog(cookie, 1);

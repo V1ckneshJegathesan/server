@@ -19,7 +19,14 @@
 */
 
 class XID_cache_element;
-enum xa_states { XA_ACTIVE= 0, XA_IDLE, XA_PREPARED, XA_ROLLBACK_ONLY, XA_NO_STATE };
+enum xa_states
+{
+  XA_ACTIVE= 0,
+  XA_IDLE,
+  XA_PREPARED,
+  XA_ROLLBACK_ONLY,
+  XA_NO_STATE
+};
 
 struct XID_STATE {
   XID_cache_element *xid_cache_element;
@@ -28,8 +35,9 @@ struct XID_STATE {
   bool check_has_uncommitted_xa() const;
   void set_error(uint error);
   void er_xaer_rmfail() const;
+  void er_xa_rbrollback() const;
   XID *get_xid() const;
-  enum xa_states get_state_code();
+  enum xa_states get_state_code() const;
 };
 
 void xid_cache_init(void);
