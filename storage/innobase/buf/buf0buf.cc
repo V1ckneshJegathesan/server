@@ -3220,19 +3220,20 @@ in buffer pool.
 @param[in]	file	file name
 @param[in]	line	line where called */
 void buf_page_free(const page_id_t page_id,
-                   mtr_t* mtr,
-                   const char* file,
+                   mtr_t *mtr,
+                   const char *file,
                    unsigned line)
 {
   ut_ad(mtr);
   ut_ad(mtr->is_active());
   buf_pool->stat.n_page_gets++;
-  rw_lock_t *hash_lock = buf_page_hash_lock_get(page_id);
+  rw_lock_t *hash_lock= buf_page_hash_lock_get(page_id);
   rw_lock_s_lock(hash_lock);
 
   /* page_hash can be changed. */
   hash_lock= buf_page_hash_lock_s_confirm(hash_lock, page_id);
-  buf_block_t *block= (buf_block_t*) buf_page_hash_get_low(page_id);
+  buf_block_t *block= reinterpret_cast<buf_block_t*>
+    (buf_page_hash_get_low(page_id));
 
   if (!block || buf_block_get_state(block) != BUF_BLOCK_FILE_PAGE)
   {
