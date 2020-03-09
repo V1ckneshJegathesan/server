@@ -98,3 +98,46 @@ WITH RECURSIVE cte AS (
 SELECT * FROM cte;
 
 drop table t1;
+
+--echo #
+--echo # check bit types
+--echo #
+
+create table t1 (from_ bit(3), to_ bit(3));
+insert into t1 values (1,2), (1,7), (2,3), (3,4), (4,1);
+
+WITH RECURSIVE cte (depth, from_, to_) as (
+   SELECT 0,1,1
+   UNION
+   SELECT depth+1, t1.from_, t1.to_
+      FROM t1, cte WHERE t1.from_ = cte.to_
+) CYCLE from_, to_ RESTRICT
+select * from cte;
+drop table t1;
+
+--echo #
+--echo # check bit types with BLOBs (TEXT)
+--echo #
+
+create table t1 (from_ bit(3), to_ bit(3), load_ text);
+insert into t1 values (1,2,"A"), (1,7,"A"), (2,3,"A"), (3,4,"A"), (4,1,"A");
+
+WITH RECURSIVE cte (depth, from_, to_, load_) as (
+   SELECT 0,1,1,"A"
+   UNION
+   SELECT depth+1, t1.from_, t1.to_, t1.load_
+      FROM t1, cte WHERE t1.from_ = cte.to_
+) CYCLE from_, to_, load_ RESTRICT
+select * from cte;
+insert into t1 values (4,1,"B");
+WITH RECURSIVE cte (depth, from_, to_, load_) as (
+   SELECT 0,1,1,"A"
+   UNION
+   SELECT depth+1, t1.from_, t1.to_, t1.load_
+      FROM t1, cte WHERE t1.from_ = cte.to_
+) CYCLE from_, to_, load_ RESTRICT
+select * from cte;
+
+drop table t1;
+
+
