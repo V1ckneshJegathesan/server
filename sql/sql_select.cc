@@ -18313,7 +18313,7 @@ bool Create_tmp_table::add_fields(THD *thd,
   DBUG_ASSERT(table->s->blob_fields == 0);
 
   const bool not_all_columns= !(m_select_options & TMP_TABLE_ALL_COLUMNS);
-  bool distinct_record_structure= distinct;
+  bool distinct_record_structure= m_distinct;
   uint fieldnr= 0;
   TABLE_SHARE  *share= table->s;
   Item **copy_func= param->items_to_copy;
