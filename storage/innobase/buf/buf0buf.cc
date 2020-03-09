@@ -4930,21 +4930,20 @@ buf_page_create(
 	if (block
 	    && buf_page_in_file(&block->page)
 	    && !buf_pool_watch_is_sentinel(&block->page)) {
-		BPageMutex*	block_mutex = buf_page_get_mutex(&block->page);
-		mutex_enter(block_mutex);
-
 		/* Page can be found in buf_pool */
 		mutex_exit(&buf_pool->mutex);
 		rw_lock_x_unlock(hash_lock);
 
-		block->page.status = buf_page_t::NORMAL;
-		mutex_exit(block_mutex);
-
 		buf_block_free(free_block);
 
 		if (!recv_recovery_is_on()) {
-			return buf_page_get_with_no_latch(page_id, zip_size,
-							  mtr);
+			/* FIXME: Remove the redundant lookup and avoid
+			the unnecessary invocation of buf_zip_decompress().
+			We may have to convert buf_page_t to buf_block_t,
+			but we are going to initialize the page. */
+			return buf_page_get_gen(page_id, zip_size, RW_NO_LATCH,
+						block, BUF_GET_POSSIBLY_FREED,
+						__FILE__, __LINE__, mtr);
 		}
 
 		mutex_exit(&recv_sys.mutex);
