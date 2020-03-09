@@ -3219,55 +3219,52 @@ in buffer pool.
 @param[in,out]	mtr	mini-transaction
 @param[in]	file	file name
 @param[in]	line	line where called */
-void buf_page_free(
-	const page_id_t	page_id,
-	mtr_t*		mtr,
-	const char*	file,
-	unsigned	line)
+void buf_page_free(const page_id_t page_id,
+                   mtr_t* mtr,
+                   const char* file,
+                   unsigned line)
 {
-	buf_block_t*	block;
-	rw_lock_t*	hash_lock;
+  ut_ad(mtr);
+  ut_ad(mtr->is_active());
+  buf_pool->stat.n_page_gets++;
+  rw_lock_t *hash_lock = buf_page_hash_lock_get(page_id);
+  rw_lock_s_lock(hash_lock);
 
-	ut_ad(mtr);
-	ut_ad(mtr->is_active());
+  /* page_hash can be changed. */
+  hash_lock= buf_page_hash_lock_s_confirm(hash_lock, page_id);
+  buf_block_t *block= (buf_block_t*) buf_page_hash_get_low(page_id);
 
-	buf_pool->stat.n_page_gets++;
-	hash_lock = buf_page_hash_lock_get(page_id);
-	rw_lock_s_lock(hash_lock);
+  if (!block || buf_block_get_state(block) != BUF_BLOCK_FILE_PAGE)
+  {
+    /* FIXME: if block!=NULL, convert to BUF_BLOCK_FILE_PAGE,
+    but avoid buf_zip_decompress() */
+    /* FIXME: If block==NULL, introduce a separate data structure
+    to cover freed page ranges to augment buf_flush_freed_page() */
+    rw_lock_s_unlock(hash_lock);
+    return;
+  }
 
-	/* page_hash can be changed. */
-	hash_lock = buf_page_hash_lock_s_confirm(hash_lock, page_id);
-	block = (buf_block_t*) buf_page_hash_get_low(page_id);
-
-	if (!block) {
-		/* Page is not in buffer pool */
-		rw_lock_s_unlock(hash_lock);
-		return;
-        }
-	block->fix();
-
-	BPageMutex*	block_mutex = buf_page_get_mutex(&block->page);
-	mutex_enter(block_mutex);
-	/* Now safe to release page_hash mutex */
-	rw_lock_s_unlock(hash_lock);
-
-	ut_ad(block->page.buf_fix_count > 0);
+  block->fix();
+  mutex_enter(&block->mutex);
+  /* Now safe to release page_hash mutex */
+  rw_lock_s_unlock(hash_lock);
+  ut_ad(block->page.buf_fix_count > 0);
 
 #ifdef UNIV_DEBUG
-	if (!fsp_is_system_temporary(page_id.space())) {
-		ibool   ret = rw_lock_s_lock_nowait(block->debug_latch,
-						    file, line);
-		ut_a(ret);
-	}
+  if (!fsp_is_system_temporary(page_id.space()))
+  {
+    ibool ret= rw_lock_s_lock_nowait(block->debug_latch, file, line);
+    ut_a(ret);
+  }
 #endif /* UNIV_DEBUG */
 
-	mtr_memo_type_t fix_type = MTR_MEMO_PAGE_X_FIX;
-	rw_lock_x_lock_inline(&block->lock, 0, file, line);
-	mtr_memo_push(mtr, block, fix_type);
+  mtr_memo_type_t fix_type= MTR_MEMO_PAGE_X_FIX;
+  rw_lock_x_lock_inline(&block->lock, 0, file, line);
+  mtr_memo_push(mtr, block, fix_type);
 
-	block->page.status = buf_page_t::FREED;
-	buf_block_dbg_add_level(block, SYNC_NO_ORDER_CHECK);
-	mutex_exit(block_mutex);
+  block->page.status= buf_page_t::FREED;
+  buf_block_dbg_add_level(block, SYNC_NO_ORDER_CHECK);
+  mutex_exit(&block->mutex);
 }
 
 /** Attempts to discard the uncompressed frame of a compressed page.

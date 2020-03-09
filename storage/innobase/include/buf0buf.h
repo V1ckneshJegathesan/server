@@ -408,11 +408,10 @@ page number. If the page is not in buffer pool then ignore it.
 @param[in,out]	mtr	mini-transaction
 @param[in]	file	file name
 @param[in]	line	line where called */
-void buf_page_free(
-	const page_id_t	page_id,
-	mtr_t*		mtr,
-	const char*	file,
-	unsigned	line);
+void buf_page_free(const page_id_t page_id,
+                   mtr_t* mtr,
+                   const char* file,
+                   unsigned line);
 
 /********************************************************************//**
 Reads the freed_page_clock of a buffer block.
