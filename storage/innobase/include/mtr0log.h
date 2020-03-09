@@ -510,7 +510,7 @@ inline void mtr_t::init(buf_block_t *b)
 
   m_log.close(log_write<INIT_PAGE>(b->page.id, &b->page));
   m_last_offset= FIL_PAGE_TYPE;
-  b->page.init_on_flush= true;
+  b->page.status= buf_page_t::INIT_ON_FLUSH;
 }
 
 /** Free a page.

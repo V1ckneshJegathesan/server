@@ -2642,7 +2642,7 @@ fseg_free_page_func(
 
 	fseg_free_page_low(seg_inode, iblock, space, offset, ahi, mtr);
 
-	ut_d(buf_page_set_file_page_was_freed(page_id_t(space->id, offset)));
+	buf_page_free(page_id_t(space->id, offset), mtr, __FILE__, __LINE__);
 
 	DBUG_VOID_RETURN;
 }
@@ -2747,13 +2747,13 @@ fseg_free_extent(
 
 	fsp_free_extent(space, page, mtr);
 
-#ifdef UNIV_DEBUG
 	for (ulint i = 0; i < FSP_EXTENT_SIZE; i++) {
-
-		buf_page_set_file_page_was_freed(
-			page_id_t(space->id, first_page_in_extent + i));
+		if (!xdes_is_free(descr, i)) {
+			buf_page_free(
+			  page_id_t(space->id, first_page_in_extent + i),
+			  mtr, __FILE__, __LINE__);
+		}
 	}
-#endif /* UNIV_DEBUG */
 }
 
 #ifndef BTR_CUR_HASH_ADAPT
